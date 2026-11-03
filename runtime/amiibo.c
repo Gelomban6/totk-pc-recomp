@@ -72,8 +72,14 @@ static void parse_dump_info(const char *path) {
         snprintf(g_info.filename, sizeof(g_info.filename), "%s", name);
     }
 
-    // UID: bytes 0..6 (7 bytes) or up to 9
-    memcpy(g_info.uuid, g_dump, 7);
+    // 7-byte NTAG215 UID: bytes 0..2 (UID0..2) and bytes 4..7 (UID3..6); byte 3 is BCC0
+    g_info.uuid[0] = g_dump[0];
+    g_info.uuid[1] = g_dump[1];
+    g_info.uuid[2] = g_dump[2];
+    g_info.uuid[3] = g_dump[4];
+    g_info.uuid[4] = g_dump[5];
+    g_info.uuid[5] = g_dump[6];
+    g_info.uuid[6] = g_dump[7];
     g_info.uuid_len = 7;
 
     // Amiibo ID at offset 0x54 (8 bytes: 3 bytes char+variant, 1 byte type, 2 bytes number, 1 byte series, 1 byte version)
@@ -103,13 +109,19 @@ static void randomize_uid_locked(void) {
     g_dump[7] = uid[6];
     g_dump[8] = (uint8_t)(uid[3] ^ uid[4] ^ uid[5] ^ uid[6]);
 
-    memcpy(g_info.uuid, g_dump, 7);
+    memcpy(g_info.uuid, uid, 7);
 }
 
 static void restore_original_uid_locked(void) {
     if (!g_has_dump) return;
     memcpy(g_dump, g_orig_dump, 9);
-    memcpy(g_info.uuid, g_dump, 7);
+    g_info.uuid[0] = g_orig_dump[0];
+    g_info.uuid[1] = g_orig_dump[1];
+    g_info.uuid[2] = g_orig_dump[2];
+    g_info.uuid[3] = g_orig_dump[4];
+    g_info.uuid[4] = g_orig_dump[5];
+    g_info.uuid[5] = g_orig_dump[6];
+    g_info.uuid[6] = g_orig_dump[7];
 }
 
 void amiibo_init(void) {
@@ -395,8 +407,14 @@ void amiibo_get_tag_info(void *out_tag_info) {
     plat_mutex_lock(&g_amiibo_lock);
     uint8_t *out = (uint8_t *)out_tag_info;
     memset(out, 0, 0x58);
-    // UUID: offset 0x00, 10 bytes max
-    memcpy(out + 0x00, g_dump, 7);
+    // UUID at offset 0x00: 7 bytes (true NTAG215 UID, skipping BCC0 at byte 3)
+    out[0] = g_dump[0];
+    out[1] = g_dump[1];
+    out[2] = g_dump[2];
+    out[3] = g_dump[4];
+    out[4] = g_dump[5];
+    out[5] = g_dump[6];
+    out[6] = g_dump[7];
     out[0x0A] = 7;          // UUID length
     // Protocol at offset 0x20: TypeA = 1
     *(uint32_t *)(out + 0x20) = 1;
