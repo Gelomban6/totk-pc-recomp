@@ -76,11 +76,11 @@ static void parse_dump_info(const char *path) {
     memcpy(g_info.uuid, g_dump, 7);
     g_info.uuid_len = 7;
 
-    // Amiibo ID at offset 0x54 (8 bytes)
+    // Amiibo ID at offset 0x54 (8 bytes: 3 bytes char+variant, 1 byte type, 2 bytes number, 1 byte series, 1 byte version)
     memcpy(g_info.character_id, g_dump + 0x54, 3);
-    g_info.series_id = g_dump[0x57];
+    g_info.series_id = g_dump[0x5A];
     g_info.numbering_id = ((uint16_t)g_dump[0x58] << 8) | g_dump[0x59];
-    g_info.nfp_type = g_dump[0x5A];
+    g_info.nfp_type = g_dump[0x57];
     g_info.version = g_dump[0x5B];
 }
 
@@ -409,15 +409,15 @@ void amiibo_get_model_info(void *out_model_info) {
     plat_mutex_lock(&g_amiibo_lock);
     uint8_t *out = (uint8_t *)out_model_info;
     memset(out, 0, 0x40);
-    // Character ID at 0x00 (3 bytes)
+    // Character ID & variant at 0x00 (3 bytes: raw dump 0x54..0x56)
     memcpy(out + 0x00, g_dump + 0x54, 3);
-    // Series ID at 0x03 (1 byte)
-    out[0x03] = g_dump[0x57];
-    // Numbering ID at 0x04 (2 bytes, big-endian from 0x58)
-    out[0x04] = g_dump[0x58];
-    out[0x05] = g_dump[0x59];
-    // NFP Type at 0x06 (1 byte)
-    out[0x06] = g_dump[0x5A];
+    // Series ID at 0x03 (1 byte: raw dump 0x5A)
+    out[0x03] = g_dump[0x5A];
+    // Numbering ID at 0x04 (2 bytes little-endian on Switch: swapped from big-endian 0x58..0x59 in raw dump)
+    out[0x04] = g_dump[0x59];
+    out[0x05] = g_dump[0x58];
+    // NFP Type at 0x06 (1 byte: raw dump 0x57)
+    out[0x06] = g_dump[0x57];
     plat_mutex_unlock(&g_amiibo_lock);
 }
 
@@ -425,11 +425,11 @@ void amiibo_get_common_info(void *out_common_info) {
     plat_mutex_lock(&g_amiibo_lock);
     uint8_t *out = (uint8_t *)out_common_info;
     memset(out, 0, 0x40);
-    // Last write date: 0x00..0x03
-    out[0x00] = 0x07; out[0x01] = 0xE7; // 2023
+    // Last write date: 0x00..0x03 (Date struct: u16 le year, u8 month, u8 day)
+    out[0x00] = 0xE7; out[0x01] = 0x07; // 2023
     out[0x02] = 0x05; out[0x03] = 0x0C; // May 12
-    // Write counter: 0x04..0x05
-    out[0x04] = 0x00; out[0x05] = 0x01;
+    // Write counter: 0x04..0x05 (u16 le)
+    out[0x04] = 0x01; out[0x05] = 0x00;
     // Version: 0x06
     out[0x06] = 0x02;
     // Application area size: 0x08..0x0B = 0xD8 (216 bytes)
@@ -443,8 +443,8 @@ void amiibo_get_register_info(void *out_register_info) {
     memset(out, 0, 0x100);
     // Mii CharInfo at 0x00..0x57 (dummy valid mii)
     out[0x00] = 0x03; // version 3
-    // First write date at 0x58..0x5B
-    out[0x58] = 0x07; out[0x59] = 0xE7;
+    // First write date at 0x58..0x5B (Date struct: u16 le year, u8 month, u8 day)
+    out[0x58] = 0xE7; out[0x59] = 0x07;
     out[0x5A] = 0x05; out[0x5B] = 0x0C;
     // Amiibo Name at 0x5C: copy up to 40 bytes NUL-terminated
     const char *name = g_info.filename[0] ? g_info.filename : "Amiibo";
