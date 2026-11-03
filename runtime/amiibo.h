@@ -69,6 +69,9 @@ void amiibo_set_auto_remove(bool enable);
 bool amiibo_get_auto_remove(void);
 void amiibo_set_auto_remove_delay_s(float seconds);
 float amiibo_get_auto_remove_delay_s(void);
+void amiibo_set_random_uid(bool enable);
+bool amiibo_get_random_uid(void);
+void amiibo_randomize_uid(void);
 
 // Tag inspection
 bool amiibo_has_tag(void);

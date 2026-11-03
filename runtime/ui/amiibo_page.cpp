@@ -278,6 +278,11 @@ void tab_amiibo(float scale) {
         }
     }
 
+    bool random_uid = amiibo_get_random_uid();
+    if (ImGui::Checkbox(menu_text(UI_MENU_AMIIBO_RANDOM_UID), &random_uid)) {
+        amiibo_set_random_uid(random_uid);
+    }
+
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::TextUnformatted(menu_text(UI_MENU_AMIIBO_TAG));

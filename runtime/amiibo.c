@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "amiibo.h"
+#include "cfg.h"
 #include "host.h"
 #include "platform/platform.h"
 
@@ -11,6 +12,7 @@ static PlatMutex g_amiibo_lock = PLAT_MUTEX_INIT;
 
 // 540-byte raw NTAG215 binary dump
 static uint8_t g_dump[AMIIBO_DUMP_SIZE];
+static uint8_t g_orig_dump[AMIIBO_DUMP_SIZE];
 static bool g_has_dump = false;
 static AmiiboInfo g_info;
 
@@ -20,6 +22,7 @@ static bool g_tag_present = false;
 static bool g_mounted = false;
 static bool g_auto_remove = true;
 static float g_auto_remove_delay_s = 2.5f;
+static bool g_random_uid = true;
 
 static uint64_t g_tap_timestamp_ns = 0;
 static bool g_timer_active = false;
@@ -81,6 +84,34 @@ static void parse_dump_info(const char *path) {
     g_info.version = g_dump[0x5B];
 }
 
+static void randomize_uid_locked(void) {
+    if (!g_has_dump) return;
+    uint8_t uid[7];
+    uid[0] = g_orig_dump[0] ? g_orig_dump[0] : 0x04;
+    for (int i = 1; i < 7; ++i) {
+        uint32_t r = (uint32_t)rand() ^ (uint32_t)(plat_now_ns() >> (i * 4));
+        uid[i] = (uint8_t)(r & 0xFF);
+        if (uid[i] == 0) uid[i] = (uint8_t)(i * 37 + 1);
+    }
+    g_dump[0] = uid[0];
+    g_dump[1] = uid[1];
+    g_dump[2] = uid[2];
+    g_dump[3] = (uint8_t)(0x88 ^ uid[0] ^ uid[1] ^ uid[2]);
+    g_dump[4] = uid[3];
+    g_dump[5] = uid[4];
+    g_dump[6] = uid[5];
+    g_dump[7] = uid[6];
+    g_dump[8] = (uint8_t)(uid[3] ^ uid[4] ^ uid[5] ^ uid[6]);
+
+    memcpy(g_info.uuid, g_dump, 7);
+}
+
+static void restore_original_uid_locked(void) {
+    if (!g_has_dump) return;
+    memcpy(g_dump, g_orig_dump, 9);
+    memcpy(g_info.uuid, g_dump, 7);
+}
+
 void amiibo_init(void) {
     plat_mutex_lock(&g_amiibo_lock);
     g_device_present = true;
@@ -90,7 +121,14 @@ void amiibo_init(void) {
     g_has_dump = false;
     g_timer_active = false;
     memset(g_dump, 0, sizeof(g_dump));
+    memset(g_orig_dump, 0, sizeof(g_orig_dump));
     memset(&g_info, 0, sizeof(g_info));
+    const char *cfg_val = cfg_get("TOTK_AMIIBO_RANDOM_UID");
+    if (cfg_val && *cfg_val) {
+        g_random_uid = (strcmp(cfg_val, "1") == 0 || strcmp(cfg_val, "true") == 0 || strcmp(cfg_val, "on") == 0);
+    } else {
+        g_random_uid = true;
+    }
     plat_mutex_unlock(&g_amiibo_lock);
 }
 
@@ -214,9 +252,13 @@ bool amiibo_load_file(const char *path) {
     }
 
     plat_mutex_lock(&g_amiibo_lock);
+    memcpy(g_orig_dump, data, AMIIBO_DUMP_SIZE);
     memcpy(g_dump, data, AMIIBO_DUMP_SIZE);
     g_has_dump = true;
     parse_dump_info(path);
+    if (g_random_uid) {
+        randomize_uid_locked();
+    }
     plat_mutex_unlock(&g_amiibo_lock);
 
     free(data);
@@ -232,12 +274,18 @@ void amiibo_tap_tag(void) {
         plat_mutex_unlock(&g_amiibo_lock);
         return;
     }
+    if (g_random_uid) {
+        randomize_uid_locked();
+    }
     g_tag_present = true;
     g_tap_timestamp_ns = plat_now_ns();
     if (g_auto_remove) {
         g_timer_active = true;
     }
-    rt_log("amiibo: tag tapped on reader ('%s')", g_info.filename);
+    rt_log("amiibo: tag tapped on reader ('%s', uid: %02x%02x%02x%02x%02x%02x%02x)",
+           g_info.filename,
+           g_info.uuid[0], g_info.uuid[1], g_info.uuid[2], g_info.uuid[3],
+           g_info.uuid[4], g_info.uuid[5], g_info.uuid[6]);
     plat_mutex_unlock(&g_amiibo_lock);
 }
 
@@ -299,6 +347,33 @@ float amiibo_get_auto_remove_delay_s(void) {
     float res = g_auto_remove_delay_s;
     plat_mutex_unlock(&g_amiibo_lock);
     return res;
+}
+
+void amiibo_set_random_uid(bool enable) {
+    plat_mutex_lock(&g_amiibo_lock);
+    g_random_uid = enable;
+    if (!enable && g_has_dump) {
+        restore_original_uid_locked();
+    } else if (enable && g_has_dump) {
+        randomize_uid_locked();
+    }
+    plat_mutex_unlock(&g_amiibo_lock);
+    cfg_set("TOTK_AMIIBO_RANDOM_UID", enable ? "1" : "0");
+}
+
+bool amiibo_get_random_uid(void) {
+    plat_mutex_lock(&g_amiibo_lock);
+    bool res = g_random_uid;
+    plat_mutex_unlock(&g_amiibo_lock);
+    return res;
+}
+
+void amiibo_randomize_uid(void) {
+    plat_mutex_lock(&g_amiibo_lock);
+    if (g_has_dump) {
+        randomize_uid_locked();
+    }
+    plat_mutex_unlock(&g_amiibo_lock);
 }
 
 bool amiibo_has_tag(void) {

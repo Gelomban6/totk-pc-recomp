@@ -50,6 +50,10 @@ __pycache__/
 /tools/xlate/bin/
 /tools/xlate/obj/
 
+# Release data (tools/make_release.py writes shader_list.tsv here)
+/data/
+/installer/launcher/launcher_text.h
+
 # Coding-agent setup and working notes (skills, hooks, playbook, backlog, research notes, milestone plans): local to
 # the maintainer's machine. tools/worktree.py links .claude and notes into task worktrees.
 /.claude/

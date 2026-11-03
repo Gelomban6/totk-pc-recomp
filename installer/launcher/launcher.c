@@ -42,7 +42,16 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     while (n > 0 && folder[n - 1] != L'\\') n--;
     folder[n > 0 ? n - 1 : 0] = 0;
     if (swprintf(python, PATH_CHARS, L"%ls\\python\\pythonw.exe", folder) < 0 ||
-        GetFileAttributesW(python) == INVALID_FILE_ATTRIBUTES) { fail(); return 1; }
+        GetFileAttributesW(python) == INVALID_FILE_ATTRIBUTES) {
+        if (swprintf(python, PATH_CHARS, L"%ls\\.venv\\Scripts\\pythonw.exe", folder) < 0 ||
+            GetFileAttributesW(python) == INVALID_FILE_ATTRIBUTES) {
+            if (swprintf(python, PATH_CHARS, L"%ls\\.venv\\Scripts\\python.exe", folder) < 0 ||
+                GetFileAttributesW(python) == INVALID_FILE_ATTRIBUTES) {
+                fail();
+                return 1;
+            }
+        }
+    }
     if (swprintf(command, PATH_CHARS + 64, L"\"%ls\" -m installer.gui", python) < 0) { fail(); return 1; }
     if (!CreateProcessW(python, command, NULL, NULL, FALSE, 0, NULL, folder, &si, &pi)) { fail(); return 1; }
     CloseHandle(pi.hThread);

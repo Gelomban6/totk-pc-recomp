@@ -185,11 +185,14 @@ def expected_update(ctx):
 
 
 def shader_list_text(layout):
-    if layout.shader_list:
+    if layout.shader_list and layout.shader_list.is_file():
         return layout.shader_list.read_text(encoding='utf-8')
+    tsv = layout.root / 'data' / 'shader_list.tsv'
+    if tsv.is_file():
+        return tsv.read_text(encoding='utf-8')
     try:
         return shader_list.history(layout.root / 'refs' / 'MacNativeGames')
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         raise InstallError('prepare.shader_list_missing')
 
 
@@ -311,7 +314,7 @@ class Check(Step):
         # reported by run(), where the error names this step.
         try:
             self.host(ctx)
-        except InstallError:
+        except (InstallError, OSError):
             pass
         return ''
 
@@ -388,7 +391,10 @@ class Check(Step):
             command += [f'--sysroot={layout.sysroot}', '-fuse-ld=lld']
         if os.name != 'nt':
             command.append('-ldl')
-        r = subprocess.run(command, capture_output=True, text=True, errors='replace')
+        try:
+            r = subprocess.run(command, capture_output=True, text=True, errors='replace')
+        except OSError as e:
+            raise InstallError('check.toolchain_broken', detail=str(e))
         if r.returncode:
             ctx.reporter.log(r.stdout + r.stderr)
             raise InstallError('check.toolchain_broken', detail=(r.stderr or r.stdout).strip()[-400:])
