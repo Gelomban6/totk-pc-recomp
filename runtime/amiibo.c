@@ -59,6 +59,12 @@ static bool amiibo_validate_dump(const uint8_t *data, uint64_t size) {
     return true;
 }
 
+// The 7-byte UID of an NTAG215 dump: bytes 0..2, then 4..7. Byte 3 is the check byte BCC0.
+static void copy_uid(uint8_t out[7], const uint8_t *dump) {
+    memcpy(out, dump, 3);
+    memcpy(out + 3, dump + 4, 4);
+}
+
 static void parse_dump_info(const char *path) {
     memset(&g_info, 0, sizeof(g_info));
     if (path) {
@@ -72,21 +78,15 @@ static void parse_dump_info(const char *path) {
         snprintf(g_info.filename, sizeof(g_info.filename), "%s", name);
     }
 
-    // 7-byte NTAG215 UID: bytes 0..2 (UID0..2) and bytes 4..7 (UID3..6); byte 3 is BCC0
-    g_info.uuid[0] = g_dump[0];
-    g_info.uuid[1] = g_dump[1];
-    g_info.uuid[2] = g_dump[2];
-    g_info.uuid[3] = g_dump[4];
-    g_info.uuid[4] = g_dump[5];
-    g_info.uuid[5] = g_dump[6];
-    g_info.uuid[6] = g_dump[7];
+    copy_uid(g_info.uuid, g_dump);
     g_info.uuid_len = 7;
 
-    // Amiibo ID at offset 0x54 (8 bytes: 3 bytes char+variant, 1 byte type, 2 bytes number, 1 byte series, 1 byte version)
+    // Amiibo ID at offset 0x54 (8 bytes, 3dbrew "Amiibo"): character ID and variant, figure type, model number
+    // (big-endian), series, format version 02
     memcpy(g_info.character_id, g_dump + 0x54, 3);
-    g_info.series_id = g_dump[0x5A];
-    g_info.numbering_id = ((uint16_t)g_dump[0x58] << 8) | g_dump[0x59];
     g_info.nfp_type = g_dump[0x57];
+    g_info.numbering_id = ((uint16_t)g_dump[0x58] << 8) | g_dump[0x59];
+    g_info.series_id = g_dump[0x5A];
     g_info.version = g_dump[0x5B];
 }
 
@@ -407,14 +407,8 @@ void amiibo_get_tag_info(void *out_tag_info) {
     plat_mutex_lock(&g_amiibo_lock);
     uint8_t *out = (uint8_t *)out_tag_info;
     memset(out, 0, 0x58);
-    // UUID at offset 0x00: 7 bytes (true NTAG215 UID, skipping BCC0 at byte 3)
-    out[0] = g_dump[0];
-    out[1] = g_dump[1];
-    out[2] = g_dump[2];
-    out[3] = g_dump[4];
-    out[4] = g_dump[5];
-    out[5] = g_dump[6];
-    out[6] = g_dump[7];
+    // UUID: offset 0x00, 10 bytes max
+    copy_uid(out, g_dump);
     out[0x0A] = 7;          // UUID length
     // Protocol at offset 0x20: TypeA = 1
     *(uint32_t *)(out + 0x20) = 1;
@@ -427,15 +421,14 @@ void amiibo_get_model_info(void *out_model_info) {
     plat_mutex_lock(&g_amiibo_lock);
     uint8_t *out = (uint8_t *)out_model_info;
     memset(out, 0, 0x40);
-    // Character ID & variant at 0x00 (3 bytes: raw dump 0x54..0x56)
-    memcpy(out + 0x00, g_dump + 0x54, 3);
-    // Series ID at 0x03 (1 byte: raw dump 0x5A)
-    out[0x03] = g_dump[0x5A];
-    // Numbering ID at 0x04 (2 bytes little-endian on Switch: swapped from big-endian 0x58..0x59 in raw dump)
-    out[0x04] = g_dump[0x59];
+    // nn::nfp::ModelInfo from the amiibo ID at 0x54: character ID and variant in the tag's byte order, series, model
+    // number little-endian (big-endian on the tag), figure type. The game tells figures of one character apart by the
+    // model number.
+    memcpy(out + 0x00, g_dump + 0x54, 3);   // character ID, variant
+    out[0x03] = g_dump[0x5A];               // series
+    out[0x04] = g_dump[0x59];               // model number
     out[0x05] = g_dump[0x58];
-    // NFP Type at 0x06 (1 byte: raw dump 0x57)
-    out[0x06] = g_dump[0x57];
+    out[0x06] = g_dump[0x57];               // figure type
     plat_mutex_unlock(&g_amiibo_lock);
 }
 
@@ -443,8 +436,8 @@ void amiibo_get_common_info(void *out_common_info) {
     plat_mutex_lock(&g_amiibo_lock);
     uint8_t *out = (uint8_t *)out_common_info;
     memset(out, 0, 0x40);
-    // Last write date: 0x00..0x03 (Date struct: u16 le year, u8 month, u8 day)
-    out[0x00] = 0xE7; out[0x01] = 0x07; // 2023
+    // Last write date: 0x00..0x03
+    out[0x00] = 0xE7; out[0x01] = 0x07; // 2023, u16 little-endian
     out[0x02] = 0x05; out[0x03] = 0x0C; // May 12
     // Write counter: 0x04..0x05 (u16 le)
     out[0x04] = 0x01; out[0x05] = 0x00;
@@ -461,8 +454,8 @@ void amiibo_get_register_info(void *out_register_info) {
     memset(out, 0, 0x100);
     // Mii CharInfo at 0x00..0x57 (dummy valid mii)
     out[0x00] = 0x03; // version 3
-    // First write date at 0x58..0x5B (Date struct: u16 le year, u8 month, u8 day)
-    out[0x58] = 0xE7; out[0x59] = 0x07;
+    // First write date at 0x58..0x5B
+    out[0x58] = 0xE7; out[0x59] = 0x07;   // 2023, u16 little-endian
     out[0x5A] = 0x05; out[0x5B] = 0x0C;
     // Amiibo Name at 0x5C: copy up to 40 bytes NUL-terminated
     const char *name = g_info.filename[0] ? g_info.filename : "Amiibo";
